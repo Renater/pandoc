@@ -246,6 +246,7 @@ General options {.options}
       if you need extensions not supported in [`gfm`](#markdown-variants).
     - `haddock` ([Haddock markup])
     - `html` ([HTML])
+    - `ipynb` ([Jupyter notebook])
     - `jats` ([JATS] XML)
     - `json` (JSON version of native AST)
     - `latex` ([LaTeX])
@@ -298,6 +299,7 @@ General options {.options}
     - `html` or `html5` ([HTML], i.e. [HTML5]/XHTML [polyglot markup])
     - `html4` ([XHTML] 1.0 Transitional)
     - `icml` ([InDesign ICML])
+    - `ipynb` ([Jupyter notebook])
     - `jats` ([JATS] XML)
     - `json` (JSON version of native AST)
     - `latex` ([LaTeX])
@@ -469,6 +471,7 @@ General options {.options}
 [PDF]: https://www.adobe.com/pdf/
 [reveal.js]: http://lab.hakim.se/reveal-js/
 [FictionBook2]: http://www.fictionbook.org/index.php/Eng:XML_Schema_Fictionbook_2.1
+[Jupyter notebook]: https://nbformat.readthedocs.io/en/latest/
 [InDesign ICML]: http://wwwimages.adobe.com/www.adobe.com/content/dam/acom/en/devnet/indesign/sdk/cs6/idml/idml-cookbook.pdf
 [TEI Simple]: https://github.com/TEIC/TEI-Simple
 [Muse]: https://amusewiki.org/library/manual
@@ -1801,6 +1804,10 @@ Extensions only used by them are therefore covered in the
 section [Pandoc's Markdown] below (See [Markdown variants] for
 `commonmark` and `gfm`.) In the following, extensions that also work
 for other formats are covered.
+
+Note that markdown extensions added to the `ipynb` format
+affect Markdown cells in Jupyter notebooks (as do command-line
+options like `--atx-headers`).
 
 Typography
 ----------
