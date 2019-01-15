@@ -113,7 +113,10 @@ instance ToJSON (Notebook a) where
    [ "nbformat" .= fst (n_nbformat n)
    , "nbformat_minor" .= snd (n_nbformat n)
    , "metadata" .= (n_metadata n)
-   , "cells" .= (n_cells n)
+   , "cells" .= (if n_nbformat n >= (4,1)
+                    then id
+                    else map (\c -> c{ c_attachments = Nothing }))
+                (n_cells n)
    ]
 
 type JSONMeta = M.Map Text Value
