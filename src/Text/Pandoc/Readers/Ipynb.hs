@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-
 Copyright (C) 2019 John MacFarlane <jgm@berkeley.edu>
@@ -57,11 +58,16 @@ import Text.Pandoc.Readers.Markdown (readMarkdown)
 
 readIpynb :: PandocMonad m => ReaderOptions -> Text -> m Pandoc
 readIpynb opts t = do
-  case eitherDecode (BL.fromStrict $ TE.encodeUtf8 t) of
-    Left err -> throwError $ PandocIpynbDecodingError err
-    Right notebook -> notebookToPandoc opts notebook
+  let src = BL.fromStrict (TE.encodeUtf8 t)
+  case eitherDecode src of
+    Right (notebook4 :: Notebook NbV4) -> notebookToPandoc opts notebook4
+    Left _ ->
+      case eitherDecode src of
+        Right (notebook3 :: Notebook NbV3) -> notebookToPandoc opts notebook3
+        Left err -> throwError $ PandocIpynbDecodingError err
 
-notebookToPandoc :: PandocMonad m => ReaderOptions -> Notebook a -> m Pandoc
+notebookToPandoc :: (PandocMonad m, FromJSON (Notebook a))
+                 => ReaderOptions -> Notebook a -> m Pandoc
 notebookToPandoc opts notebook = do
   let cells = n_cells notebook
   let m = jsonMetaToMeta (n_metadata notebook)
@@ -74,7 +80,8 @@ notebookToPandoc opts notebook = do
   bs <- mconcat <$> mapM (cellToBlocks opts lang) cells
   return $ B.setMeta "jupyter" (MetaMap m) $ B.doc bs
 
-cellToBlocks :: PandocMonad m => ReaderOptions -> String -> Cell a -> m B.Blocks
+cellToBlocks :: PandocMonad m
+             => ReaderOptions -> String -> Cell a -> m B.Blocks
 cellToBlocks opts lang c = do
   let Source ts = c_source c
   let source = mconcat ts
@@ -132,6 +139,14 @@ outputToBlock Execute_result{ e_execution_count = ec,
                               e_metadata = metadata' } =
   B.divWith ("",["output", "execute_result"],[("execution_count",show ec)])
       . mconcat <$> mapM (handleData metadata') (M.toList data')
+outputToBlock Err{ e_ename = ename,
+                   e_evalue = evalue,
+                   e_traceback = traceback } = do
+  return $ B.divWith ("",["output","error"],
+                         [("ename",T.unpack ename),
+                          ("evalue",T.unpack evalue)])
+         $ B.codeBlockWith ("",["traceback"],[])
+         $ T.unpack . T.unlines $ traceback
 
 handleData :: PandocMonad m
            => JSONMeta -> (MimeType, MimeData) -> m B.Blocks

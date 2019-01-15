@@ -73,7 +73,7 @@ pandocToNotebook opts (Pandoc meta blocks) = do
   cells <- extractCells opts blocks
   return $ Notebook{
        n_metadata = metadata
-     , n_nbformat = (4, 4)
+     , n_nbformat = (4, 5)
      , n_cells = cells }
 
 extractCells :: PandocMonad m => WriterOptions -> [Block] -> m [Cell a]

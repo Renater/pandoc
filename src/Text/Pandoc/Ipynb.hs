@@ -2,6 +2,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-
 Copyright (C) 2019 John MacFarlane <jgm@berkeley.edu>
@@ -51,7 +53,9 @@ module Text.Pandoc.Ipynb ( Notebook(..)
                          )
 where
 import Prelude
+import Data.Maybe (mapMaybe)
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
@@ -67,7 +71,7 @@ import GHC.Generics
 import Control.Monad (when)
 import Text.Pandoc.MIME (MimeType)
 
-encodeNotebook :: Notebook a -> Text
+encodeNotebook :: ToJSON (Notebook a) => Notebook a -> Text
 encodeNotebook = TE.decodeUtf8 . BL.toStrict .
   encodePretty' defConfig{
       confIndent  = Spaces 1,
@@ -94,13 +98,12 @@ instance Semigroup (Notebook a) where
 instance Monoid (Notebook a) where
   mempty = Notebook mempty (0, 0) mempty
 
-instance FromJSON (Notebook a) where
+instance FromJSON (Notebook NbV4) where
   parseJSON = withObject "Notebook" $ \v -> do
     fmt <- v .:? "nbformat" .!= 0
-    when (fmt < 4) $
-      fail "only versions > 4 of the Jupyter notebook format are supported"
+    when (fmt < 4 || fmt > 4) $ fail "expected nbformat == 4"
     fmtminor <- v .:? "nbformat_minor" .!= 0
-    metadata <- v .: "metadata" <|> return mempty
+    metadata <- v .:? "metadata" .!= mempty
     cells <- v .: "cells"
     return $
       Notebook{ n_metadata = metadata
@@ -108,7 +111,22 @@ instance FromJSON (Notebook a) where
               , n_cells = cells
               }
 
-instance ToJSON (Notebook a) where
+instance FromJSON (Notebook NbV3) where
+  parseJSON = withObject "Notebook" $ \v -> do
+    fmt <- v .:? "nbformat" .!= 0
+    when (fmt < 3 || fmt > 3) $ fail $ "expected nbformat == 3"
+    fmtminor <- v .:? "nbformat_minor" .!= 0
+    metadata <- v .:? "metadata" .!= mempty
+    worksheets <- v .: "worksheets"
+    cells <- mconcat <$> mapM (.: "cells") worksheets
+    -- Note: if there are multiple worksheets, we collapse them (rare).
+    return $
+      Notebook{ n_metadata = metadata
+              , n_nbformat = (fmt, fmtminor)
+              , n_cells = cells
+              }
+
+instance ToJSON (Notebook NbV4) where
  toJSON n = object
    [ "nbformat" .= fst (n_nbformat n)
    , "nbformat_minor" .= snd (n_nbformat n)
@@ -139,7 +157,7 @@ data Cell a = Cell
   , c_attachments      :: Maybe (M.Map Text MimeBundle)
 } deriving (Show, Generic)
 
-instance FromJSON (Cell a) where
+instance FromJSON (Cell NbV4) where
   parseJSON = withObject "Cell" $ \v -> do
     ty <- v .: "cell_type"
     cell_type <-
@@ -161,9 +179,41 @@ instance FromJSON (Cell a) where
           , c_source = source
           }
 
--- need manual instance because null execution_count can't
--- be omitted!
-instance ToJSON (Cell a) where
+instance FromJSON (Cell NbV3) where
+  parseJSON = withObject "Cell" $ \v -> do
+    ty <- v .: "cell_type"
+    cell_type <-
+      case ty of
+        "markdown" -> pure Markdown
+        "heading" -> pure Markdown
+        "raw" -> pure Raw
+        "code" ->
+          Code
+            <$> v .: "prompt_number"
+            <*> v .: "outputs"
+        _ -> fail $ "Unknown cell_type " ++ ty
+    metadata <- v .: "metadata"
+    attachments <- v .:? "attachments"
+    source <- if ty == "code"
+                 then v .: "input"
+                 else v .: "source"
+    source' <- if ty == "heading"
+                  then do
+                    (level :: Int) <- v .: "level"
+                    let hashes = T.replicate level "#"
+                    -- parse heading as regular markdown cell
+                    return $ Source $ breakLines
+                           $ hashes <> " " <> mconcat (unSource source)
+                  else pure source
+    return
+      Cell{ c_cell_type = cell_type
+          , c_metadata = metadata
+          , c_attachments = attachments
+          , c_source = source'
+          }
+
+-- note that execution_count can't be omitted!
+instance ToJSON (Cell NbV4) where
  toJSON c = object $
    [ "source" .= (c_source c)
    , "metadata" .= (c_metadata c)
@@ -202,9 +252,14 @@ data Output a =
     , e_data            :: MimeBundle
     , e_metadata        :: JSONMeta
     }
+  | Err
+    { e_ename           :: Text
+    , e_evalue          :: Text
+    , e_traceback       :: [Text]
+    }
   deriving (Show, Generic)
 
-instance FromJSON (Output a) where
+instance FromJSON (Output NbV4) where
   parseJSON = withObject "Object" $ \v -> do
     ty <- v .: "output_type"
     case ty of
@@ -215,15 +270,57 @@ instance FromJSON (Output a) where
       "display_data" ->
         Display_data
           <$> v .: "data"
-          <*> v .: "metadata"
+          <*> v .:? "metadata" .!= mempty
       "execute_result" ->
         Execute_result
           <$> v .: "execution_count"
           <*> v .: "data"
-          <*> v .: "metadata"
+          <*> v .:? "metadata" .!= mempty
+      "error" ->
+        Err
+          <$> v .: "ename"
+          <*> v .: "evalue"
+          <*> v .: "traceback"
       _ -> fail $ "Unknown object_type " ++ ty
 
-instance ToJSON (Output a) where
+instance FromJSON (Output NbV3) where
+  parseJSON = withObject "Object" $ \v -> do
+    ty <- v .: "output_type"
+    case ty of
+      "stream" ->
+        Stream
+          <$> v .: "stream"
+          <*> v .: "text"
+      "display_data" ->
+        Display_data
+          <$> extractNbV3Data v
+          <*> v .:? "metadata" .!= mempty
+      "pyout" ->
+        Execute_result
+          <$> v .: "prompt_number"
+          <*> extractNbV3Data v
+          <*> v .:? "metadata" .!= mempty
+      "pyerr" ->
+        Err
+          <$> v .: "ename"
+          <*> v .: "evalue"
+          <*> v .: "traceback"
+      _ -> fail $ "Unknown object_type " ++ ty
+
+-- Remove keys output_type, prompt_number, metadata;
+-- change short keys like text and png to mime types.
+extractNbV3Data :: Aeson.Object -> Aeson.Parser MimeBundle
+extractNbV3Data v = do
+  let go ("output_type", _) = Nothing
+      go ("metadata", _) = Nothing
+      go ("prompt_number", _) = Nothing
+      go ("text", x) = Just ("text/plain", x)
+      go ("png", x)  = Just ("image/png", x)
+      go ("jpg", x)  = Just ("image/jpeg", x)
+      go (_, _) = Nothing -- TODO complete list? where documented?
+  parseJSON (Object . HM.fromList . mapMaybe go . HM.toList $ v)
+
+instance ToJSON (Output NbV4) where
   toJSON s@(Stream{}) = object
     [ "output_type" .= ("stream" :: Text)
     , "name" .= s_name s
@@ -239,6 +336,12 @@ instance ToJSON (Output a) where
     , "execution_count" .= e_execution_count e
     , "data" .= e_data e
     , "metadata" .= e_metadata e
+    ]
+  toJSON e@(Err{}) = object
+    [ "output_type" .= ("error" :: Text)
+    , "ename" .= e_ename e
+    , "evalue" .= e_evalue e
+    , "traceback" .= e_traceback e
     ]
 
 data MimeData =
