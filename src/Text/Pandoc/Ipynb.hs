@@ -46,15 +46,20 @@ module Text.Pandoc.Ipynb ( Notebook(..)
                          , MimeData(..)
                          , MimeBundle(..)
                          , breakLines
+                         , encodeNotebook
                          )
 where
 import Prelude
 import qualified Data.Map as M
 import Data.Text (Text)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BL
 import Data.Aeson as Aeson
+import Data.Aeson.Encode.Pretty (Config(..), defConfig, encodePretty',
+                                 keyOrder, Indent(Spaces))
 import qualified Data.Aeson.Types as Aeson
 import Control.Applicative ((<|>))
 import qualified Data.ByteString.Base64 as Base64
@@ -69,6 +74,17 @@ customOptions = defaultOptions
                 , omitNothingFields = True
                 , constructorTagModifier = map toLower
                 }
+
+encodeNotebook :: Notebook -> Text
+encodeNotebook = TE.decodeUtf8 . BL.toStrict .
+  encodePretty' defConfig{
+      confIndent  = Spaces 1,
+      confCompare = keyOrder
+           [ "cells", "nbformat", "nbformat_minor",
+             "cell_type", "output_type",
+             "execution_count", "metadata",
+             "outputs", "source",
+             "data", "name", "text" ] }
 
 data Notebook = Notebook
   { n_metadata       :: JSONMeta
@@ -93,7 +109,12 @@ instance FromJSON Notebook where
               }
 
 instance ToJSON Notebook where
- toEncoding = genericToEncoding customOptions
+ toJSON n = object
+   [ "nbformat" .= (n_nbformat n)
+   , "nbformat_minor" .= (n_nbformat_minor n)
+   , "metadata" .= (n_metadata n)
+   , "cells" .= (n_cells n)
+   ]
 
 type JSONMeta = M.Map Text Value
 
@@ -123,39 +144,46 @@ instance FromJSON Cell where
 -- need manual instance because null execution_count can't
 -- be omitted!
 instance ToJSON Cell where
- toEncoding c = pairs $
-      "cell_type" .= (c_cell_type c)
-   <> "source" .= (c_source c)
-   <> "metadata" .= (c_metadata c)
-   <> case c_cell_type c of
-         Code -> "execution_count" .= (c_execution_count c)
-         _ -> mempty
-   <> maybe mempty ("outputs" .=) (c_outputs c)
-   <> maybe mempty ("attachments" .=) (c_attachments c)
+ toJSON c = object $
+   [ "cell_type" .= (c_cell_type c)
+   , "source" .= (c_source c)
+   , "metadata" .= (c_metadata c)
+   ] ++
+   case c_cell_type c of
+     Code ->
+      [ "execution_count" .= (c_execution_count c)
+      , "outputs" .= fromMaybe [] (c_outputs c) ]
+     Markdown ->
+      maybe [] (\x -> ["attachments" .= x]) (c_attachments c)
+     _ -> []
 
 data CellType =
     Markdown
   | Raw
   | Code
-  deriving (Show, Generic)
+  deriving (Show, Generic, Eq)
 
 instance FromJSON CellType where
   parseJSON = genericParseJSON customOptions
 
 instance ToJSON CellType where
- toEncoding = genericToEncoding customOptions
+ toJSON Markdown = String "markdown"
+ toJSON Raw      = String "raw"
+ toJSON Code     = String "code"
 
 data OutputType =
     Stream
   | Display_data
   | Execute_result
-  deriving (Show, Generic)
+  deriving (Show, Generic, Eq)
 
 instance FromJSON OutputType where
   parseJSON = genericParseJSON customOptions
 
 instance ToJSON OutputType where
- toEncoding = genericToEncoding customOptions
+ toJSON Stream         = String "stream"
+ toJSON Display_data   = String "display_data"
+ toJSON Execute_result = String "execute_result"
 
 data Output = Output{
     o_output_type     :: OutputType
@@ -170,7 +198,20 @@ instance FromJSON Output where
   parseJSON = genericParseJSON customOptions
 
 instance ToJSON Output where
- toEncoding = genericToEncoding customOptions
+  toJSON o = object $
+    ("output_type" .= (o_output_type o)) :
+    maybe [] (\m -> [("metadata" .= m)]) (o_metadata o) ++
+    case o_output_type o of
+      Stream ->
+        [ "name" .= (o_name o)
+        , "o_text" .= (o_text o)
+        ]
+      Display_data ->
+        [ "data" .= (o_data o) ]
+      Execute_result ->
+        [ "execution_count" .= (o_execution_count o)
+        , "o_data" .= (o_data o)
+        ]
 
 data MimeData =
     BinaryData ByteString

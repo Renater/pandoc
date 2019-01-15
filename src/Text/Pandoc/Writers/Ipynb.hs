@@ -46,8 +46,6 @@ import Text.Pandoc.Ipynb as Ipynb
 import Text.Pandoc.Class
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import qualified Data.ByteString.Lazy as BL
 import Data.Aeson as Aeson
 import Text.Pandoc.Shared (safeRead)
 import Text.Pandoc.Writers.Shared (metaToJSON')
@@ -56,7 +54,7 @@ import Text.Pandoc.Writers.Markdown (writeMarkdown)
 writeIpynb :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeIpynb opts d = do
   notebook <- pandocToNotebook opts d
-  return $ TE.decodeUtf8 $ BL.toStrict $ encode notebook
+  return $ encodeNotebook notebook
 
 pandocToNotebook :: PandocMonad m => WriterOptions -> Pandoc -> m Notebook
 pandocToNotebook opts (Pandoc meta blocks) = do
