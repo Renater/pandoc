@@ -41,7 +41,6 @@ module Text.Pandoc.Ipynb ( Notebook(..)
                          , Cell(..)
                          , Source(..)
                          , CellType(..)
-                         , OutputType(..)
                          , Output(..)
                          , MimeData(..)
                          , MimeBundle(..)
@@ -171,47 +170,57 @@ instance ToJSON CellType where
  toJSON Raw      = String "raw"
  toJSON Code     = String "code"
 
-data OutputType =
+data Output =
     Stream
+    { s_name            :: Text
+    , s_text            :: Source }
   | Display_data
+    { d_data            :: MimeBundle
+    , d_metadata        :: JSONMeta
+    }
   | Execute_result
-  deriving (Show, Generic, Eq)
-
-instance FromJSON OutputType where
-  parseJSON = genericParseJSON customOptions
-
-instance ToJSON OutputType where
- toJSON Stream         = String "stream"
- toJSON Display_data   = String "display_data"
- toJSON Execute_result = String "execute_result"
-
-data Output = Output{
-    o_output_type     :: OutputType
-  , o_name            :: Maybe Text
-  , o_text            :: Maybe Source
-  , o_data            :: Maybe MimeBundle
-  , o_metadata        :: Maybe JSONMeta
-  , o_execution_count :: Maybe Int
-  } deriving (Show, Generic)
+    { e_execution_count :: Int
+    , e_data            :: MimeBundle
+    , e_metadata        :: JSONMeta
+    }
+  deriving (Show, Generic)
 
 instance FromJSON Output where
-  parseJSON = genericParseJSON customOptions
+  parseJSON = withObject "Object" $ \v -> do
+    ty <- v .: "output_type"
+    case ty of
+      "stream" ->
+        Stream
+          <$> v .: "name"
+          <*> v .: "text"
+      "display_data" ->
+        Display_data
+          <$> v .: "data"
+          <*> v .: "metadata"
+      "execute_result" ->
+        Execute_result
+          <$> v .: "execution_count"
+          <*> v .: "data"
+          <*> v .: "metadata"
+      _ -> fail $ "Unknown object_type " ++ ty
 
 instance ToJSON Output where
-  toJSON o = object $
-    ("output_type" .= (o_output_type o)) :
-    maybe [] (\m -> [("metadata" .= m)]) (o_metadata o) ++
-    case o_output_type o of
-      Stream ->
-        [ "name" .= (o_name o)
-        , "o_text" .= (o_text o)
-        ]
-      Display_data ->
-        [ "data" .= (o_data o) ]
-      Execute_result ->
-        [ "execution_count" .= (o_execution_count o)
-        , "o_data" .= (o_data o)
-        ]
+  toJSON s@(Stream{}) = object
+    [ "output_type" .= ("stream" :: Text)
+    , "name" .= s_name s
+    , "text" .= s_text s
+    ]
+  toJSON d@(Display_data{}) = object
+    [ "output_type" .= ("display_data" :: Text)
+    , "data" .= d_data d
+    , "metadata" .= d_metadata d
+    ]
+  toJSON e@(Execute_result{}) = object
+    [ "output_type" .= ("execute_result" :: Text)
+    , "execution_count" .= e_execution_count e
+    , "data" .= e_data e
+    , "metadata" .= e_metadata e
+    ]
 
 data MimeData =
     BinaryData ByteString

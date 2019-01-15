@@ -36,7 +36,6 @@ module Text.Pandoc.Readers.Ipynb ( readIpynb )
 where
 import Prelude
 import Data.Maybe (fromMaybe)
-import Data.Char (toLower)
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import Text.Pandoc.Options
 import qualified Text.Pandoc.Builder as B
@@ -121,20 +120,20 @@ addAttachment (fname, mimeBundle) = do
     [] -> report $ CouldNotFetchResource fp "no attachment"
 
 outputToBlock :: PandocMonad m => Output -> m B.Blocks
-outputToBlock o = do
-  let kvs = maybe mempty (\ec -> [("execution_count", show ec)])
-             (o_execution_count o)
-  let classes = ["output", map toLower . show . o_output_type $ o]
-  let source = maybe mempty (T.unpack . mconcat . unSource) (o_text o)
-  let streamName = maybe [] (\n -> [T.unpack n]) (o_name o)
-  let data' = maybe mempty (M.toList . unMimeBundle) (o_data o)
-  let metadata' = fromMaybe mempty (o_metadata o)
-  innerContents <-
-    case o_output_type o of
-      Stream -> return $ B.codeBlockWith ("",streamName,[]) source
-      Display_data -> mconcat <$> mapM (handleData metadata') data'
-      Execute_result -> mconcat <$> mapM (handleData metadata') data'
-  return $ B.divWith ("",classes,kvs) innerContents
+outputToBlock Stream{ s_name = streamName,
+                      s_text = Source text } = do
+  return $ B.divWith ("",["output","stream"],[])
+         $ B.codeBlockWith ("",[T.unpack streamName],[])
+         $ T.unpack . mconcat $ text
+outputToBlock Display_data{ d_data = MimeBundle data',
+                            d_metadata = metadata' } =
+  B.divWith ("",["output", "display_data"],[]) . mconcat <$>
+    mapM (handleData metadata') (M.toList data')
+outputToBlock Execute_result{ e_execution_count = ec,
+                              e_data = MimeBundle data',
+                              e_metadata = metadata' } =
+  B.divWith ("",["output", "execute_result"],[("execution_count",show ec)])
+      . mconcat <$> mapM (handleData metadata') (M.toList data')
 
 handleData :: PandocMonad m
            => JSONMeta -> (MimeType, MimeData) -> m B.Blocks
