@@ -119,7 +119,6 @@ instance FromJSON (Notebook NbV3) where
     metadata <- v .:? "metadata" .!= mempty
     worksheets <- v .: "worksheets"
     cells <- mconcat <$> mapM (.: "cells") worksheets
-    -- Note: if there are multiple worksheets, we collapse them (rare).
     return $
       Notebook{ n_metadata = metadata
               , n_nbformat = (fmt, fmtminor)
