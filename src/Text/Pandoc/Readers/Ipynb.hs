@@ -78,10 +78,7 @@ cellToBlocks :: PandocMonad m => ReaderOptions -> String -> Cell -> m B.Blocks
 cellToBlocks opts lang c = do
   let Source ts = c_source c
   let source = mconcat ts
-  let kvs = jsonMetaToPairs (c_metadata c) ++
-            maybe mempty (\ec -> [("execution_count", show ec)])
-             (c_execution_count c)
-  let outputs = fromMaybe mempty $ c_outputs c
+  let kvs = jsonMetaToPairs (c_metadata c)
   let attachments = maybe mempty M.toList $ c_attachments c
   mapM_ addAttachment attachments
   case c_cell_type c of
@@ -101,9 +98,10 @@ cellToBlocks opts lang c = do
               _                 -> format
       return $ B.divWith ("",["cell","raw"],kvs) $ B.rawBlock format'
              $ T.unpack source
-    Ipynb.Code -> do
+    Ipynb.Code{ c_outputs = outputs, c_execution_count = ec } -> do
       outputBlocks <- mconcat <$> mapM outputToBlock outputs
-      return $ B.divWith ("",["cell","code"],kvs) $
+      let kvs' = maybe kvs (\x -> ("execution_count", show x):kvs) ec
+      return $ B.divWith ("",["cell","code"],kvs') $
         B.codeBlockWith ("",[lang],[]) (T.unpack source)
         <> outputBlocks
 

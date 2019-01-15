@@ -51,7 +51,6 @@ where
 import Prelude
 import qualified Data.Map as M
 import Data.Text (Text)
-import Data.Maybe (fromMaybe)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
 import Data.ByteString (ByteString)
@@ -63,16 +62,8 @@ import qualified Data.Aeson.Types as Aeson
 import Control.Applicative ((<|>))
 import qualified Data.ByteString.Base64 as Base64
 import GHC.Generics
-import Data.Char (toLower)
 import Control.Monad (when)
 import Text.Pandoc.MIME (MimeType)
-
-customOptions :: Aeson.Options
-customOptions = defaultOptions
-                { fieldLabelModifier = drop 2
-                , omitNothingFields = True
-                , constructorTagModifier = map toLower
-                }
 
 encodeNotebook :: Notebook -> Text
 encodeNotebook = TE.decodeUtf8 . BL.toStrict .
@@ -87,10 +78,16 @@ encodeNotebook = TE.decodeUtf8 . BL.toStrict .
 
 data Notebook = Notebook
   { n_metadata       :: JSONMeta
-  , n_nbformat       :: Int
-  , n_nbformat_minor :: Int
+  , n_nbformat       :: (Int, Int)
   , n_cells          :: [Cell]
   } deriving (Show, Generic)
+
+instance Semigroup Notebook where
+  Notebook m1 f1 c1 <> Notebook m2 f2 c2 =
+    Notebook (m1 <> m2) (max f1 f2) (c1 <> c2)
+
+instance Monoid Notebook where
+  mempty = Notebook mempty (0, 0) mempty
 
 instance FromJSON Notebook where
   parseJSON = withObject "Notebook" $ \v -> do
@@ -102,15 +99,14 @@ instance FromJSON Notebook where
     cells <- v .: "cells"
     return $
       Notebook{ n_metadata = metadata
-              , n_nbformat = fmt
-              , n_nbformat_minor = fmtminor
+              , n_nbformat = (fmt, fmtminor)
               , n_cells = cells
               }
 
 instance ToJSON Notebook where
  toJSON n = object
-   [ "nbformat" .= (n_nbformat n)
-   , "nbformat_minor" .= (n_nbformat_minor n)
+   [ "nbformat" .= fst (n_nbformat n)
+   , "nbformat_minor" .= snd (n_nbformat n)
    , "metadata" .= (n_metadata n)
    , "cells" .= (n_cells n)
    ]
@@ -132,43 +128,58 @@ data Cell = Cell
   { c_cell_type        :: CellType
   , c_source           :: Source
   , c_metadata         :: JSONMeta
-  , c_execution_count  :: Maybe Int
-  , c_outputs          :: Maybe [Output]
   , c_attachments      :: Maybe (M.Map Text MimeBundle)
 } deriving (Show, Generic)
 
 instance FromJSON Cell where
-  parseJSON = genericParseJSON customOptions
+  parseJSON = withObject "Cell" $ \v -> do
+    ty <- v .: "cell_type"
+    cell_type <-
+      case ty of
+        "markdown" -> pure Markdown
+        "raw" -> pure Raw
+        "code" ->
+          Code
+            <$> v .: "outputs"
+            <*> v .: "execution_count"
+        _ -> fail $ "Unknown cell_type " ++ ty
+    metadata <- v .: "metadata"
+    attachments <- v .: "attachments"
+    source <- v .: "source"
+    return
+      Cell{ c_cell_type = cell_type
+          , c_metadata = metadata
+          , c_attachments = attachments
+          , c_source = source
+          }
 
 -- need manual instance because null execution_count can't
 -- be omitted!
 instance ToJSON Cell where
  toJSON c = object $
-   [ "cell_type" .= (c_cell_type c)
-   , "source" .= (c_source c)
+   [ "source" .= (c_source c)
    , "metadata" .= (c_metadata c)
    ] ++
+   maybe [] (\x -> ["attachments" .= x]) (c_attachments c) ++
    case c_cell_type c of
-     Code ->
-      [ "execution_count" .= (c_execution_count c)
-      , "outputs" .= fromMaybe [] (c_outputs c) ]
-     Markdown ->
-      maybe [] (\x -> ["attachments" .= x]) (c_attachments c)
-     _ -> []
+     Markdown -> [ "cell_type" .= ("markdown" :: Text) ]
+     Raw      -> [ "cell_type" .= ("raw" :: Text) ]
+     Code{
+         c_execution_count = ec
+       , c_outputs = outs
+       }      -> [ "cell_type" .= ("code" :: Text)
+                 , "execution_count" .= ec
+                 , "outputs" .= outs
+                 ]
 
 data CellType =
     Markdown
   | Raw
   | Code
-  deriving (Show, Generic, Eq)
-
-instance FromJSON CellType where
-  parseJSON = genericParseJSON customOptions
-
-instance ToJSON CellType where
- toJSON Markdown = String "markdown"
- toJSON Raw      = String "raw"
- toJSON Code     = String "code"
+    { c_execution_count  :: Maybe Int
+    , c_outputs          :: [Output]
+    }
+  deriving (Show, Generic)
 
 data Output =
     Stream

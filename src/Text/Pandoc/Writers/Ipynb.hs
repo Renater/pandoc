@@ -72,8 +72,7 @@ pandocToNotebook opts (Pandoc meta blocks) = do
   cells <- extractCells opts blocks
   return $ Notebook{
        n_metadata = metadata
-     , n_nbformat = 4
-     , n_nbformat_minor = 4
+     , n_nbformat = (4, 4)
      , n_cells = cells }
 
 extractCells :: PandocMonad m => WriterOptions -> [Block] -> m [Cell]
@@ -89,8 +88,6 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
           c_cell_type = Markdown
         , c_source = Source $ breakLines source
         , c_metadata = meta
-        , c_execution_count = Nothing
-        , c_outputs = Nothing
         , c_attachments = attachments } :) <$> extractCells opts bs
   | "cell" `elem` classes
   , "code" `elem` classes = do
@@ -100,14 +97,15 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
       let codeContent = mconcat $ intersperse "\n"
               [t | CodeBlock _ t <- codeBlocks]
       let meta = pairsToJSONMeta kvs
-      let outputs = Just mempty -- TODO add this later
+      let outputs = mempty -- TODO add this later
       let exeCount = lookup "execution_count" kvs >>= safeRead
       (Cell{
-          c_cell_type = Ipynb.Code
+          c_cell_type = Ipynb.Code {
+                c_execution_count = exeCount
+              , c_outputs = outputs
+              }
         , c_source = Source $ breakLines $ T.pack codeContent
         , c_metadata = meta
-        , c_execution_count = exeCount
-        , c_outputs = outputs
         , c_attachments = Nothing } :) <$> extractCells opts bs
   | "cell" `elem` classes
   , "raw" `elem` classes =
@@ -126,8 +124,6 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
             , c_source = Source $ breakLines $ T.pack raw
             , c_metadata = M.insert "format"
                              (Aeson.String $ T.pack format') mempty
-            , c_execution_count = Nothing
-            , c_outputs = Nothing
             , c_attachments = Nothing } :) <$> extractCells opts bs
         _ -> extractCells opts bs
 extractCells opts (CodeBlock (_id,classes,kvs) raw : bs)
@@ -135,11 +131,12 @@ extractCells opts (CodeBlock (_id,classes,kvs) raw : bs)
       let meta = pairsToJSONMeta kvs
       let exeCount = lookup "execution_count" kvs >>= safeRead
       (Cell{
-          c_cell_type = Ipynb.Code
+          c_cell_type = Ipynb.Code {
+                c_execution_count = exeCount
+              , c_outputs = []
+              }
         , c_source = Source $ breakLines $ T.pack raw
         , c_metadata = meta
-        , c_execution_count = exeCount
-        , c_outputs = Just mempty
         , c_attachments = Nothing } :) <$> extractCells opts bs
 extractCells opts (b:bs) = do
       let isCodeOrDiv (CodeBlock (_,cl,_) _) = "python" `elem` cl
@@ -154,8 +151,6 @@ extractCells opts (b:bs) = do
           c_cell_type = Markdown
         , c_source = Source $ breakLines source
         , c_metadata = mempty
-        , c_execution_count = Nothing
-        , c_outputs = Nothing
         , c_attachments = attachments } :) <$> extractCells opts rest
 
 pairsToJSONMeta :: [(String, String)] -> JSONMeta
