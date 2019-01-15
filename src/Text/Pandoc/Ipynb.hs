@@ -145,11 +145,11 @@ instance FromJSON (Cell a) where
         "raw" -> pure Raw
         "code" ->
           Code
-            <$> v .: "outputs"
-            <*> v .: "execution_count"
+            <$> v .: "execution_count"
+            <*> v .: "outputs"
         _ -> fail $ "Unknown cell_type " ++ ty
     metadata <- v .: "metadata"
-    attachments <- v .: "attachments"
+    attachments <- v .:? "attachments"
     source <- v .: "source"
     return
       Cell{ c_cell_type = cell_type
