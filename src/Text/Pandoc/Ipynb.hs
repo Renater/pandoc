@@ -37,6 +37,8 @@ We only support v4.  To convert an older notebook to v4 use nbconvert:
 @ipython nbconvert --to=notebook testnotebook.ipynb@.
 -}
 module Text.Pandoc.Ipynb ( Notebook(..)
+                         , NbV3
+                         , NbV4
                          , JSONMeta
                          , Cell(..)
                          , Source(..)
@@ -65,7 +67,7 @@ import GHC.Generics
 import Control.Monad (when)
 import Text.Pandoc.MIME (MimeType)
 
-encodeNotebook :: Notebook -> Text
+encodeNotebook :: Notebook a -> Text
 encodeNotebook = TE.decodeUtf8 . BL.toStrict .
   encodePretty' defConfig{
       confIndent  = Spaces 1,
@@ -76,20 +78,23 @@ encodeNotebook = TE.decodeUtf8 . BL.toStrict .
              "outputs", "source",
              "data", "name", "text" ] }
 
-data Notebook = Notebook
+data NbV3
+data NbV4
+
+data Notebook a = Notebook
   { n_metadata       :: JSONMeta
   , n_nbformat       :: (Int, Int)
-  , n_cells          :: [Cell]
+  , n_cells          :: [Cell a]
   } deriving (Show, Generic)
 
-instance Semigroup Notebook where
+instance Semigroup (Notebook a) where
   Notebook m1 f1 c1 <> Notebook m2 f2 c2 =
     Notebook (m1 <> m2) (max f1 f2) (c1 <> c2)
 
-instance Monoid Notebook where
+instance Monoid (Notebook a) where
   mempty = Notebook mempty (0, 0) mempty
 
-instance FromJSON Notebook where
+instance FromJSON (Notebook a) where
   parseJSON = withObject "Notebook" $ \v -> do
     fmt <- v .:? "nbformat" .!= 0
     when (fmt < 4) $
@@ -103,7 +108,7 @@ instance FromJSON Notebook where
               , n_cells = cells
               }
 
-instance ToJSON Notebook where
+instance ToJSON (Notebook a) where
  toJSON n = object
    [ "nbformat" .= fst (n_nbformat n)
    , "nbformat_minor" .= snd (n_nbformat n)
@@ -124,14 +129,14 @@ instance FromJSON Source where
 instance ToJSON Source where
   toJSON (Source ts) = toJSON ts
 
-data Cell = Cell
-  { c_cell_type        :: CellType
+data Cell a = Cell
+  { c_cell_type        :: CellType a
   , c_source           :: Source
   , c_metadata         :: JSONMeta
   , c_attachments      :: Maybe (M.Map Text MimeBundle)
 } deriving (Show, Generic)
 
-instance FromJSON Cell where
+instance FromJSON (Cell a) where
   parseJSON = withObject "Cell" $ \v -> do
     ty <- v .: "cell_type"
     cell_type <-
@@ -155,7 +160,7 @@ instance FromJSON Cell where
 
 -- need manual instance because null execution_count can't
 -- be omitted!
-instance ToJSON Cell where
+instance ToJSON (Cell a) where
  toJSON c = object $
    [ "source" .= (c_source c)
    , "metadata" .= (c_metadata c)
@@ -172,16 +177,16 @@ instance ToJSON Cell where
                  , "outputs" .= outs
                  ]
 
-data CellType =
+data CellType a =
     Markdown
   | Raw
   | Code
     { c_execution_count  :: Maybe Int
-    , c_outputs          :: [Output]
+    , c_outputs          :: [Output a]
     }
   deriving (Show, Generic)
 
-data Output =
+data Output a =
     Stream
     { s_name            :: Text
     , s_text            :: Source }
@@ -196,7 +201,7 @@ data Output =
     }
   deriving (Show, Generic)
 
-instance FromJSON Output where
+instance FromJSON (Output a) where
   parseJSON = withObject "Object" $ \v -> do
     ty <- v .: "output_type"
     case ty of
@@ -215,7 +220,7 @@ instance FromJSON Output where
           <*> v .: "metadata"
       _ -> fail $ "Unknown object_type " ++ ty
 
-instance ToJSON Output where
+instance ToJSON (Output a) where
   toJSON s@(Stream{}) = object
     [ "output_type" .= ("stream" :: Text)
     , "name" .= s_name s

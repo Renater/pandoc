@@ -56,7 +56,8 @@ writeIpynb opts d = do
   notebook <- pandocToNotebook opts d
   return $ encodeNotebook notebook
 
-pandocToNotebook :: PandocMonad m => WriterOptions -> Pandoc -> m Notebook
+pandocToNotebook :: PandocMonad m
+                 => WriterOptions -> Pandoc -> m (Notebook NbV4)
 pandocToNotebook opts (Pandoc meta blocks) = do
   let blockWriter bs = writeMarkdown
            opts{ writerTemplate = Nothing } (Pandoc nullMeta bs)
@@ -75,7 +76,7 @@ pandocToNotebook opts (Pandoc meta blocks) = do
      , n_nbformat = (4, 4)
      , n_cells = cells }
 
-extractCells :: PandocMonad m => WriterOptions -> [Block] -> m [Cell]
+extractCells :: PandocMonad m => WriterOptions -> [Block] -> m [Cell a]
 extractCells _ [] = return []
 extractCells opts (Div (_id,classes,kvs) xs : bs)
   | "cell" `elem` classes

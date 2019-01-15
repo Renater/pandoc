@@ -61,7 +61,7 @@ readIpynb opts t = do
     Left err -> throwError $ PandocIpynbDecodingError err
     Right notebook -> notebookToPandoc opts notebook
 
-notebookToPandoc :: PandocMonad m => ReaderOptions -> Notebook -> m Pandoc
+notebookToPandoc :: PandocMonad m => ReaderOptions -> Notebook a -> m Pandoc
 notebookToPandoc opts notebook = do
   let cells = n_cells notebook
   let m = jsonMetaToMeta (n_metadata notebook)
@@ -74,7 +74,7 @@ notebookToPandoc opts notebook = do
   bs <- mconcat <$> mapM (cellToBlocks opts lang) cells
   return $ B.setMeta "jupyter" (MetaMap m) $ B.doc bs
 
-cellToBlocks :: PandocMonad m => ReaderOptions -> String -> Cell -> m B.Blocks
+cellToBlocks :: PandocMonad m => ReaderOptions -> String -> Cell a -> m B.Blocks
 cellToBlocks opts lang c = do
   let Source ts = c_source c
   let source = mconcat ts
@@ -117,7 +117,7 @@ addAttachment (fname, mimeBundle) = do
       insertMedia fp (Just mimeType) (encode v)
     [] -> report $ CouldNotFetchResource fp "no attachment"
 
-outputToBlock :: PandocMonad m => Output -> m B.Blocks
+outputToBlock :: PandocMonad m => Output a -> m B.Blocks
 outputToBlock Stream{ s_name = streamName,
                       s_text = Source text } = do
   return $ B.divWith ("",["output","stream"],[])
