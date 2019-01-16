@@ -42,9 +42,9 @@ import Text.Pandoc.Options
 import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Logging
 import Text.Pandoc.Definition
-import Text.Pandoc.Ipynb as Ipynb
+import Data.Ipynb as Ipynb
 import Text.Pandoc.Class
-import Text.Pandoc.MIME (MimeType, extensionFromMimeType)
+import Text.Pandoc.MIME (extensionFromMimeType)
 import Text.Pandoc.UTF8
 import Text.Pandoc.Error
 import Data.Text (Text)
@@ -117,11 +117,12 @@ addAttachment (fname, mimeBundle) = do
   let fp = T.unpack fname
   case M.toList (unMimeBundle mimeBundle) of
     (mimeType, BinaryData bs):_ ->
-      insertMedia fp (Just mimeType) (BL.fromStrict bs)
+      insertMedia fp (Just $ T.unpack mimeType) (BL.fromStrict bs)
     (mimeType, TextualData t):_ ->
-      insertMedia fp (Just mimeType) (BL.fromStrict $ TE.encodeUtf8 t)
+      insertMedia fp (Just $ T.unpack mimeType)
+          (BL.fromStrict $ TE.encodeUtf8 t)
     (mimeType, JsonData v):_ ->
-      insertMedia fp (Just mimeType) (encode v)
+      insertMedia fp (Just $ T.unpack mimeType) (encode v)
     [] -> report $ CouldNotFetchResource fp "no attachment"
 
 outputToBlock :: PandocMonad m => Output a -> m B.Blocks
@@ -153,7 +154,7 @@ handleData :: PandocMonad m
 handleData metadata' (mimeType, mimeData) = do
   -- normally metadata maps from mime types to key-value map;
   -- but not always...
-  let meta = case M.lookup (T.pack mimeType) metadata' of
+  let meta = case M.lookup mimeType metadata' of
                Just v@(Object{}) ->
                  case fromJSON v of
                    Success m' -> m'
@@ -165,10 +166,10 @@ handleData metadata' (mimeType, mimeData) = do
       let bl = BL.fromStrict bs
       -- SHA1 hash for filename
       let fname = showDigest (sha1 bl) ++
-            case extensionFromMimeType mimeType of
+            case extensionFromMimeType (T.unpack mimeType) of
               Nothing  -> ""
               Just ext -> '.':ext
-      insertMedia fname (Just mimeType) bl
+      insertMedia fname (Just $ T.unpack mimeType) bl
       return $ B.para $ B.imageWith ("",[],metaPairs) fname "" mempty
     TextualData t ->
       return $ B.codeBlockWith ("",[],metaPairs) $ T.unpack t

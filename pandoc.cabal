@@ -398,7 +398,8 @@ library
                  http-types >= 0.8 && < 0.13,
                  case-insensitive >= 1.2 && < 1.3,
                  unicode-transforms >= 0.3 && < 0.4,
-                 HsYAML >= 0.1.1.1 && < 0.2
+                 HsYAML >= 0.1.1.1 && < 0.2,
+                 ipynb >= 0.1 && < 0.2
   if impl(ghc < 8.0)
     build-depends: semigroups == 0.18.*,
                    -- basement 0.0.8 and foundation 0.0.21, transitive
@@ -522,8 +523,7 @@ library
                    Text.Pandoc.Emoji,
                    Text.Pandoc.ImageSize,
                    Text.Pandoc.BCP47,
-                   Text.Pandoc.Class,
-                   Text.Pandoc.Ipynb
+                   Text.Pandoc.Class
   other-modules:   Text.Pandoc.App.CommandLineOptions,
                    Text.Pandoc.App.FormatHeuristics,
                    Text.Pandoc.App.Opt,

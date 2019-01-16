@@ -42,7 +42,7 @@ import qualified Data.Map as M
 import Data.List (partition, intersperse)
 import Text.Pandoc.Options
 import Text.Pandoc.Definition
-import Text.Pandoc.Ipynb as Ipynb
+import Data.Ipynb as Ipynb
 import Text.Pandoc.Class
 import Data.Text (Text)
 import qualified Data.Text as T
