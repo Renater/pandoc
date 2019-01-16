@@ -50,11 +50,23 @@ import Data.Aeson as Aeson
 import Text.Pandoc.Shared (safeRead)
 import Text.Pandoc.Writers.Shared (metaToJSON')
 import Text.Pandoc.Writers.Markdown (writeMarkdown)
+import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString.Lazy as BL
+import Data.Aeson.Encode.Pretty (Config(..), defConfig,
+           encodePretty', keyOrder, Indent(Spaces))
 
 writeIpynb :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeIpynb opts d = do
   notebook <- pandocToNotebook opts d
-  return $ encodeNotebook notebook
+  return $ TE.decodeUtf8 . BL.toStrict . encodePretty' defConfig{
+             confIndent  = Spaces 1,
+             confCompare = keyOrder
+               [ "cells", "nbformat", "nbformat_minor",
+                 "cell_type", "output_type",
+                 "execution_count", "metadata",
+                 "outputs", "source",
+                 "data", "name", "text" ] }
+         $ notebook
 
 pandocToNotebook :: PandocMonad m
                  => WriterOptions -> Pandoc -> m (Notebook NbV4)
