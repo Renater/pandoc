@@ -171,8 +171,17 @@ handleData metadata' (mimeType, mimeData) = do
               Just ext -> '.':ext
       insertMedia fname (Just $ T.unpack mimeType) bl
       return $ B.para $ B.imageWith ("",[],metaPairs) fname "" mempty
-    TextualData t ->
-      return $ B.codeBlockWith ("",[],metaPairs) $ T.unpack t
+    TextualData t
+      | mimeType == "text/html" ->
+          return $ B.rawBlock "html" $ T.unpack t
+      | mimeType == "text/latex" ->
+          return $ B.rawBlock "latex" $ T.unpack t
+      | mimeType == "text/x-rst" ->
+          return $ B.rawBlock "rst" $ T.unpack t
+      | mimeType == "text/markdown" ->
+          return $ B.rawBlock "markdown" $ T.unpack t
+      | otherwise ->
+          return $ B.codeBlockWith ("",[],metaPairs) $ T.unpack t
     JsonData v    ->
       return $ B.codeBlockWith ("",["json"],metaPairs) $ toStringLazy $ encode v
 
