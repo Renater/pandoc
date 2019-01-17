@@ -93,6 +93,11 @@ cellToBlocks opts lang c = do
       Pandoc _ bs <- readMarkdown opts source
       return $ B.divWith ("",["cell","markdown"],kvs)
              $ B.fromList bs
+    Ipynb.Heading lev -> do
+      Pandoc _ bs <- readMarkdown opts
+        (T.replicate lev "#" <> " " <> source)
+      return $ B.divWith ("",["cell","markdown"],kvs)
+             $ B.fromList bs
     Ipynb.Raw -> do
       let format = fromMaybe "" $ lookup "format" kvs
       let format' =
