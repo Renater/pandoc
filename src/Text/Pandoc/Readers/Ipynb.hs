@@ -55,6 +55,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Aeson as Aeson
 import Control.Monad.Except (throwError)
 import Text.Pandoc.Readers.Markdown (readMarkdown)
+import Text.Pandoc.Readers.HTML (readHtml)
 
 readIpynb :: PandocMonad m => ReaderOptions -> Text -> m Pandoc
 readIpynb opts t = do
@@ -199,10 +200,12 @@ handleData opts metadata (MimeBundle mb) = do
 
     dataBlock (_, BinaryData _) = return (0, mempty)
 
-    dataBlock ("text/html", TextualData t) =
-      return $ if extensionEnabled Ext_raw_html exts
-                  then (2, B.rawBlock "html" $ T.unpack t)
-                  else (0, mempty)
+    dataBlock ("text/html", TextualData t)
+      | extensionEnabled Ext_raw_html exts
+        = return (2, B.rawBlock "html" $ T.unpack t)
+      | otherwise = do -- try parsing the HTML
+          Pandoc _ bls <- readHtml opts t
+          return (1, B.fromList bls)
 
     dataBlock ("text/latex", TextualData t) =
       return $ if extensionEnabled Ext_raw_tex exts
@@ -210,7 +213,7 @@ handleData opts metadata (MimeBundle mb) = do
                   else (0, mempty)
 
     dataBlock ("text/plain", TextualData t) =
-      return (1, B.codeBlock $ T.unpack t)
+      return (0, B.codeBlock $ T.unpack t)
 
     dataBlock (_, JsonData v) =
       return (2, B.codeBlockWith ("",["json"],[]) $ toStringLazy $ encode v)
