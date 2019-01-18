@@ -1949,6 +1949,10 @@ When converting from HTML, parse elements to raw HTML which are not
 representable in pandoc's AST.
 By default, this is disabled for HTML input.
 
+As applied to `ipynb`, `raw_html` affects not only raw TeX in
+markdown cells, but data with mime type `text/html` in output
+cells.
+
 #### Extension: `raw_tex` {#raw_tex}
 
 Allows raw LaTeX, TeX, and ConTeXt to be included in a document.
@@ -1962,6 +1966,10 @@ input formats
 
 output formats
 :  `textile`, `commonmark`
+
+As applied to `ipynb`, `raw_tex` affects not only raw TeX in
+markdown cells, but data with mime type `text/latex` in output
+cells.
 
 #### Extension: `native_divs` {#native_divs}
 

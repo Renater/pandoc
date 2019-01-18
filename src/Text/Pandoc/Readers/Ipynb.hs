@@ -111,7 +111,7 @@ cellToBlocks opts lang c = do
       return $ B.divWith ("",["cell","raw"],kvs) $ B.rawBlock format'
              $ T.unpack source
     Ipynb.Code{ c_outputs = outputs, c_execution_count = ec } -> do
-      outputBlocks <- mconcat <$> mapM outputToBlock outputs
+      outputBlocks <- mconcat <$> mapM (outputToBlock opts) outputs
       let kvs' = maybe kvs (\x -> ("execution_count", show x):kvs) ec
       return $ B.divWith ("",["cell","code"],kvs') $
         B.codeBlockWith ("",[lang],[]) (T.unpack source)
@@ -130,63 +130,56 @@ addAttachment (fname, mimeBundle) = do
       insertMedia fp (Just $ T.unpack mimeType) (encode v)
     [] -> report $ CouldNotFetchResource fp "no attachment"
 
-outputToBlock :: PandocMonad m => Output a -> m B.Blocks
-outputToBlock Stream{ s_name = streamName,
-                      s_text = Source text } = do
+outputToBlock :: PandocMonad m => ReaderOptions -> Output a -> m B.Blocks
+outputToBlock _ Stream{ s_name = streamName,
+                        s_text = Source text } = do
   return $ B.divWith ("",["output","stream"],[])
          $ B.codeBlockWith ("",[T.unpack streamName],[])
          $ T.unpack . mconcat $ text
-outputToBlock Display_data{ d_data = data',
-                            d_metadata = metadata' } =
+outputToBlock opts Display_data{ d_data = data',
+                                 d_metadata = metadata' } =
   B.divWith ("",["output", "display_data"],[]) <$>
-    handleData metadata' data'
-outputToBlock Execute_result{ e_execution_count = ec,
-                              e_data = data',
-                              e_metadata = metadata' } =
+    handleData opts metadata' data'
+outputToBlock opts Execute_result{ e_execution_count = ec,
+                                   e_data = data',
+                                   e_metadata = metadata' } =
   B.divWith ("",["output", "execute_result"],[("execution_count",show ec)])
-    <$> handleData metadata' data'
-outputToBlock Err{ e_ename = ename,
-                   e_evalue = evalue,
-                   e_traceback = traceback } = do
+    <$> handleData opts metadata' data'
+outputToBlock _ Err{ e_ename = ename,
+                     e_evalue = evalue,
+                     e_traceback = traceback } = do
   return $ B.divWith ("",["output","error"],
                          [("ename",T.unpack ename),
                           ("evalue",T.unpack evalue)])
          $ B.codeBlockWith ("",["traceback"],[])
          $ T.unpack . T.unlines $ traceback
 
-data DataBlocks =
-    NativeBlocks B.Blocks
-  | RawBlocks B.Blocks
-  | FallbackBlocks B.Blocks
-
 -- We want to display the richest output possible given
 -- the output format.
 handleData :: PandocMonad m
-           => JSONMeta -> MimeBundle -> m B.Blocks
-handleData metadata (MimeBundle mb) = do
-  -- normally metadata maps from mime types to key-value map;
-  -- but not always...
+           => ReaderOptions -> JSONMeta -> MimeBundle -> m B.Blocks
+handleData opts metadata (MimeBundle mb) = do
   let mimePairs = M.toList mb
-  -- if any of these is an image, return that:
+
   results <- mapM dataBlock mimePairs
 
-  -- If we only have raw, we also include plain text fallback.
-  return $ case filter isNativeBlocks results of
-             [] -> mconcat $ map extractContent results
-             xs -> mconcat $ map extractContent xs
+  -- return the result with highest priority:
+
+  let highest = maximum (0 : map fst results)
+  return $ case [r | (pr, r) <- results, pr == highest] of
+             x:_  -> x
+             []   -> mempty
 
   where
 
-    extractContent (FallbackBlocks bs) = bs
-    extractContent (NativeBlocks bs) = bs
-    extractContent (RawBlocks bs) = bs
+    exts = readerExtensions opts
 
-    isNativeBlocks NativeBlocks{} = True
-    isNativeBlocks _ = False
-
+    dataBlock :: PandocMonad m => (MimeType, MimeData) -> m (Int, B.Blocks)
     dataBlock (mt, BinaryData bs)
      | "image/" `T.isPrefixOf` mt
       = do
+      -- normally metadata maps from mime types to key-value map;
+      -- but not always...
       let meta = case M.lookup mt metadata of
                    Just v@(Object{}) ->
                      case fromJSON v of
@@ -202,32 +195,27 @@ handleData metadata (MimeBundle mb) = do
               Nothing  -> ""
               Just ext -> '.':ext
       insertMedia fname (Just mt') bl
-      return $ NativeBlocks
-             $ B.para
-             $ B.imageWith ("",[],metaPairs) fname "" mempty
+      return (3, B.para $ B.imageWith ("",[],metaPairs) fname "" mempty)
 
-    dataBlock (_, BinaryData _) = return $ RawBlocks mempty
+    dataBlock (_, BinaryData _) = return (0, mempty)
 
-    dataBlock ("text/html", TextualData t) = do
-      return $  RawBlocks $ B.rawBlock "html" $ T.unpack t
+    dataBlock ("text/html", TextualData t) =
+      return $ if extensionEnabled Ext_raw_html exts
+                  then (2, B.rawBlock "html" $ T.unpack t)
+                  else (0, mempty)
 
     dataBlock ("text/latex", TextualData t) =
-      return $ RawBlocks $ B.rawBlock "latex" $ T.unpack t
-
-    dataBlock ("text/x-rst", TextualData t) =
-      return $ RawBlocks $ B.rawBlock "rst" $ T.unpack t
-
-    dataBlock ("text/markdown", TextualData t) =
-      return $ RawBlocks $ B.rawBlock "markdown" $ T.unpack t
+      return $ if extensionEnabled Ext_raw_tex exts
+                  then (2, B.rawBlock "latex" $ T.unpack t)
+                  else (0, mempty)
 
     dataBlock ("text/plain", TextualData t) =
-      return $ FallbackBlocks $ B.codeBlock $ T.unpack t
+      return (1, B.codeBlock $ T.unpack t)
 
     dataBlock (_, JsonData v) =
-      return $ NativeBlocks
-             $ B.codeBlockWith ("",["json"],[]) $ toStringLazy $ encode v
+      return (2, B.codeBlockWith ("",["json"],[]) $ toStringLazy $ encode v)
 
-    dataBlock _ = return $ RawBlocks mempty
+    dataBlock _ = return (0, mempty)
 
 jsonMetaToMeta :: JSONMeta -> M.Map String MetaValue
 jsonMetaToMeta = M.mapKeys T.unpack . M.map valueToMetaValue
