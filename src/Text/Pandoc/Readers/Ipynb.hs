@@ -136,15 +136,15 @@ outputToBlock Stream{ s_name = streamName,
   return $ B.divWith ("",["output","stream"],[])
          $ B.codeBlockWith ("",[T.unpack streamName],[])
          $ T.unpack . mconcat $ text
-outputToBlock Display_data{ d_data = MimeBundle data',
+outputToBlock Display_data{ d_data = data',
                             d_metadata = metadata' } =
-  B.divWith ("",["output", "display_data"],[]) . mconcat <$>
-    mapM (handleData metadata') (M.toList data')
+  B.divWith ("",["output", "display_data"],[]) <$>
+    handleData metadata' data'
 outputToBlock Execute_result{ e_execution_count = ec,
-                              e_data = MimeBundle data',
+                              e_data = data',
                               e_metadata = metadata' } =
   B.divWith ("",["output", "execute_result"],[("execution_count",show ec)])
-      . mconcat <$> mapM (handleData metadata') (M.toList data')
+    <$> handleData metadata' data'
 outputToBlock Err{ e_ename = ename,
                    e_evalue = evalue,
                    e_traceback = traceback } = do
@@ -154,41 +154,64 @@ outputToBlock Err{ e_ename = ename,
          $ B.codeBlockWith ("",["traceback"],[])
          $ T.unpack . T.unlines $ traceback
 
+-- We want to display the richest output possible given
+-- the output format.
 handleData :: PandocMonad m
-           => JSONMeta -> (MimeType, MimeData) -> m B.Blocks
-handleData metadata' (mimeType, mimeData) = do
+           => JSONMeta -> MimeBundle -> m B.Blocks
+handleData metadata (MimeBundle mb) = do
   -- normally metadata maps from mime types to key-value map;
   -- but not always...
-  let meta = case M.lookup mimeType metadata' of
-               Just v@(Object{}) ->
-                 case fromJSON v of
-                   Success m' -> m'
-                   Error _   -> mempty
-               _ -> mempty
-  let metaPairs = jsonMetaToPairs meta
-  case mimeData of
-    BinaryData bs -> do
+  let fallback = M.lookup "text/plain" mb
+  let mimePairs = M.toList $ M.delete "text/plain" mb
+  let images = filter (\(mt,_) -> "image/" `T.isPrefixOf` mt) mimePairs
+  -- if any of these is an image, return that:
+  contents <- case images of
+                (mt, BinaryData bs):_ -> imageBlock mt bs
+                _ -> mconcat <$> mapM rawBlock mimePairs
+  if contents == mempty
+     then return $ maybe mempty plainBlock fallback
+     else return contents
+
+  where
+    plainBlock (TextualData t) = B.codeBlock $ T.unpack t
+    plainBlock _ = mempty
+
+    imageBlock mt bs = do
+      let meta = case M.lookup mt metadata of
+                   Just v@(Object{}) ->
+                     case fromJSON v of
+                       Success m' -> m'
+                       Error _   -> mempty
+                   _ -> mempty
+      let metaPairs = jsonMetaToPairs meta
       let bl = BL.fromStrict bs
       -- SHA1 hash for filename
+      let mt' = T.unpack mt
       let fname = showDigest (sha1 bl) ++
-            case extensionFromMimeType (T.unpack mimeType) of
+            case extensionFromMimeType mt' of
               Nothing  -> ""
               Just ext -> '.':ext
-      insertMedia fname (Just $ T.unpack mimeType) bl
+      insertMedia fname (Just mt') bl
       return $ B.para $ B.imageWith ("",[],metaPairs) fname "" mempty
-    TextualData t
-      | mimeType == "text/html" ->
-          return $ B.rawBlock "html" $ T.unpack t
-      | mimeType == "text/latex" ->
-          return $ B.rawBlock "latex" $ T.unpack t
-      | mimeType == "text/x-rst" ->
-          return $ B.rawBlock "rst" $ T.unpack t
-      | mimeType == "text/markdown" ->
-          return $ B.rawBlock "markdown" $ T.unpack t
-      | otherwise ->
-          return $ B.codeBlockWith ("",[],metaPairs) $ T.unpack t
-    JsonData v    ->
-      return $ B.codeBlockWith ("",["json"],metaPairs) $ toStringLazy $ encode v
+
+    rawBlock (_, BinaryData _) = return mempty
+
+    rawBlock ("text/html", TextualData t) =
+      return $ B.rawBlock "html" $ T.unpack t
+
+    rawBlock ("text/latex", TextualData t) =
+      return $ B.rawBlock "latex" $ T.unpack t
+
+    rawBlock ("text/x-rst", TextualData t) =
+      return $ B.rawBlock "rst" $ T.unpack t
+
+    rawBlock ("text/markdown", TextualData t) =
+      return $ B.rawBlock "markdown" $ T.unpack t
+
+    rawBlock (_, JsonData v) =
+      return $ B.codeBlockWith ("",["json"],[]) $ toStringLazy $ encode v
+
+    rawBlock _ = return mempty
 
 jsonMetaToMeta :: JSONMeta -> M.Map String MetaValue
 jsonMetaToMeta = M.mapKeys T.unpack . M.map valueToMetaValue
