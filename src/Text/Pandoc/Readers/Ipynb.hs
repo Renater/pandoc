@@ -154,6 +154,11 @@ outputToBlock Err{ e_ename = ename,
          $ B.codeBlockWith ("",["traceback"],[])
          $ T.unpack . T.unlines $ traceback
 
+data DataBlocks =
+    NativeBlocks B.Blocks
+  | RawBlocks B.Blocks
+  | FallbackBlocks B.Blocks
+
 -- We want to display the richest output possible given
 -- the output format.
 handleData :: PandocMonad m
@@ -161,22 +166,27 @@ handleData :: PandocMonad m
 handleData metadata (MimeBundle mb) = do
   -- normally metadata maps from mime types to key-value map;
   -- but not always...
-  let fallback = M.lookup "text/plain" mb
-  let mimePairs = M.toList $ M.delete "text/plain" mb
-  let images = filter (\(mt,_) -> "image/" `T.isPrefixOf` mt) mimePairs
+  let mimePairs = M.toList mb
   -- if any of these is an image, return that:
-  contents <- case images of
-                (mt, BinaryData bs):_ -> imageBlock mt bs
-                _ -> mconcat <$> mapM rawBlock mimePairs
-  if contents == mempty
-     then return $ maybe mempty plainBlock fallback
-     else return contents
+  results <- mapM dataBlock mimePairs
+
+  -- If we only have raw, we also include plain text fallback.
+  return $ case filter isNativeBlocks results of
+             [] -> mconcat $ map extractContent results
+             xs -> mconcat $ map extractContent xs
 
   where
-    plainBlock (TextualData t) = B.codeBlock $ T.unpack t
-    plainBlock _ = mempty
 
-    imageBlock mt bs = do
+    extractContent (FallbackBlocks bs) = bs
+    extractContent (NativeBlocks bs) = bs
+    extractContent (RawBlocks bs) = bs
+
+    isNativeBlocks NativeBlocks{} = True
+    isNativeBlocks _ = False
+
+    dataBlock (mt, BinaryData bs)
+     | "image/" `T.isPrefixOf` mt
+      = do
       let meta = case M.lookup mt metadata of
                    Just v@(Object{}) ->
                      case fromJSON v of
@@ -192,26 +202,32 @@ handleData metadata (MimeBundle mb) = do
               Nothing  -> ""
               Just ext -> '.':ext
       insertMedia fname (Just mt') bl
-      return $ B.para $ B.imageWith ("",[],metaPairs) fname "" mempty
+      return $ NativeBlocks
+             $ B.para
+             $ B.imageWith ("",[],metaPairs) fname "" mempty
 
-    rawBlock (_, BinaryData _) = return mempty
+    dataBlock (_, BinaryData _) = return $ RawBlocks mempty
 
-    rawBlock ("text/html", TextualData t) =
-      return $ B.rawBlock "html" $ T.unpack t
+    dataBlock ("text/html", TextualData t) = do
+      return $  RawBlocks $ B.rawBlock "html" $ T.unpack t
 
-    rawBlock ("text/latex", TextualData t) =
-      return $ B.rawBlock "latex" $ T.unpack t
+    dataBlock ("text/latex", TextualData t) =
+      return $ RawBlocks $ B.rawBlock "latex" $ T.unpack t
 
-    rawBlock ("text/x-rst", TextualData t) =
-      return $ B.rawBlock "rst" $ T.unpack t
+    dataBlock ("text/x-rst", TextualData t) =
+      return $ RawBlocks $ B.rawBlock "rst" $ T.unpack t
 
-    rawBlock ("text/markdown", TextualData t) =
-      return $ B.rawBlock "markdown" $ T.unpack t
+    dataBlock ("text/markdown", TextualData t) =
+      return $ RawBlocks $ B.rawBlock "markdown" $ T.unpack t
 
-    rawBlock (_, JsonData v) =
-      return $ B.codeBlockWith ("",["json"],[]) $ toStringLazy $ encode v
+    dataBlock ("text/plain", TextualData t) =
+      return $ FallbackBlocks $ B.codeBlock $ T.unpack t
 
-    rawBlock _ = return mempty
+    dataBlock (_, JsonData v) =
+      return $ NativeBlocks
+             $ B.codeBlockWith ("",["json"],[]) $ toStringLazy $ encode v
+
+    dataBlock _ = return $ RawBlocks mempty
 
 jsonMetaToMeta :: JSONMeta -> M.Map String MetaValue
 jsonMetaToMeta = M.mapKeys T.unpack . M.map valueToMetaValue
