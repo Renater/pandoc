@@ -70,8 +70,8 @@ readIpynb opts t = do
 notebookToPandoc :: (PandocMonad m, FromJSON (Notebook a))
                  => ReaderOptions -> Notebook a -> m Pandoc
 notebookToPandoc opts notebook = do
-  let cells = n_cells notebook
-  let m = jsonMetaToMeta (n_metadata notebook)
+  let cells = notebookCells notebook
+  let m = jsonMetaToMeta (notebookMetadata notebook)
   let lang = case M.lookup "kernelspec" m of
                    Just (MetaMap ks) ->
                       case M.lookup "language" ks of
@@ -84,12 +84,12 @@ notebookToPandoc opts notebook = do
 cellToBlocks :: PandocMonad m
              => ReaderOptions -> String -> Cell a -> m B.Blocks
 cellToBlocks opts lang c = do
-  let Source ts = c_source c
+  let Source ts = cellSource c
   let source = mconcat ts
-  let kvs = jsonMetaToPairs (c_metadata c)
-  let attachments = maybe mempty M.toList $ c_attachments c
+  let kvs = jsonMetaToPairs (cellMetadata c)
+  let attachments = maybe mempty M.toList $ cellAttachments c
   mapM_ addAttachment attachments
-  case c_cell_type c of
+  case cellType c of
     Ipynb.Markdown -> do
       Pandoc _ bs <- readMarkdown opts source
       return $ B.divWith ("",["cell","markdown"],kvs)
@@ -111,7 +111,7 @@ cellToBlocks opts lang c = do
               _                 -> format
       return $ B.divWith ("",["cell","raw"],kvs) $ B.rawBlock format'
              $ T.unpack source
-    Ipynb.Code{ c_outputs = outputs, c_execution_count = ec } -> do
+    Ipynb.Code{ codeOutputs = outputs, codeExecutionCount = ec } -> do
       outputBlocks <- mconcat <$> mapM (outputToBlock opts) outputs
       let kvs' = maybe kvs (\x -> ("execution_count", show x):kvs) ec
       return $ B.divWith ("",["cell","code"],kvs') $
@@ -132,23 +132,23 @@ addAttachment (fname, mimeBundle) = do
     [] -> report $ CouldNotFetchResource fp "no attachment"
 
 outputToBlock :: PandocMonad m => ReaderOptions -> Output a -> m B.Blocks
-outputToBlock _ Stream{ s_name = streamName,
-                        s_text = Source text } = do
+outputToBlock _ Stream{ streamName = sName,
+                        streamText = Source text } = do
   return $ B.divWith ("",["output","stream"],[])
-         $ B.codeBlockWith ("",[T.unpack streamName],[])
+         $ B.codeBlockWith ("",[T.unpack sName],[])
          $ T.unpack . mconcat $ text
-outputToBlock opts Display_data{ d_data = data',
-                                 d_metadata = metadata' } =
+outputToBlock opts DisplayData{ displayData = data',
+                                 displayMetadata = metadata' } =
   B.divWith ("",["output", "display_data"],[]) <$>
     handleData opts metadata' data'
-outputToBlock opts Execute_result{ e_execution_count = ec,
-                                   e_data = data',
-                                   e_metadata = metadata' } =
+outputToBlock opts ExecuteResult{ executeCount = ec,
+                                   executeData = data',
+                                   executeMetadata = metadata' } =
   B.divWith ("",["output", "execute_result"],[("execution_count",show ec)])
     <$> handleData opts metadata' data'
-outputToBlock _ Err{ e_ename = ename,
-                     e_evalue = evalue,
-                     e_traceback = traceback } = do
+outputToBlock _ Err{ errName = ename,
+                     errValue = evalue,
+                     errTraceback = traceback } = do
   return $ B.divWith ("",["output","error"],
                          [("ename",T.unpack ename),
                           ("evalue",T.unpack evalue)])
