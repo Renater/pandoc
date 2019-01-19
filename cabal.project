@@ -8,4 +8,4 @@ source-repository-package
 source-repository-package
     type: git
     location: https://github.com/jgm/ipynb
-    tag: c9f8366469a960d6ed911725464544a2571287c6
+    tag: 9a18fac84cb0a239f2fe2bf8e3ceb450baf778d7

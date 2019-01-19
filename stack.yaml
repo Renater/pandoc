@@ -22,7 +22,7 @@ extra-deps:
 - github: jgm/pandoc-citeproc
   commit: 4b467c62af17ddfc739933891c5ea2291a6b9b76
 - github: jgm/ipynb
-  commit: c9f8366469a960d6ed911725464544a2571287c6
+  commit: 9a18fac84cb0a239f2fe2bf8e3ceb450baf778d7
 - haddock-library-1.7.0
 - HsYAML-0.1.1.2
 - yaml-0.11.0.0
