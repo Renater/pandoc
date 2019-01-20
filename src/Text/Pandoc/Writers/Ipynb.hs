@@ -179,38 +179,43 @@ blockToOutput (Div (_,["output","error"],kvs) (CodeBlock _ t:_)) =
               , errValue = maybe mempty T.pack (lookup "evalue" kvs)
               , errTraceback = breakLines $ T.pack t }
 blockToOutput (Div (_,["output","execute_result"],kvs) bs) = do
-  data' <- extractData bs
+  (data', metadata') <- extractData bs
   return $ Just
          $ ExecuteResult{ executeCount = fromMaybe 0 $
                           lookup "execution_count" kvs >>= safeRead
                         , executeData = data'
-                        , executeMetadata = pairsToJSONMeta kvs }
+                        , executeMetadata = pairsToJSONMeta kvs <> metadata'}
 blockToOutput (Div (_,["output","display_data"],kvs) bs) = do
-  data' <- extractData bs
+  (data', metadata') <- extractData bs
   return $ Just
          $ DisplayData { displayData = data'
-                       , displayMetadata = pairsToJSONMeta kvs }
+                       , displayMetadata = pairsToJSONMeta kvs <> metadata'}
 blockToOutput _ = return Nothing
 
-extractData :: PandocMonad m => [Block] -> m MimeBundle
-extractData bs = MimeBundle <$> foldM go mempty bs
+extractData :: PandocMonad m => [Block] -> m (MimeBundle, JSONMeta)
+extractData bs = do
+  (mmap, meta) <- foldM go mempty bs
+  return (MimeBundle mmap, meta)
   where
-    go mmap b@(Para [Image (_,_,kvs) _ (src,_)]) = do
+    go (mmap, meta) b@(Para [Image (_,_,kvs) _ (src,_)]) = do
       (img, mbmt) <- fetchItem src
       case mbmt of
-        Just mt -> return $ M.insert (T.pack mt) (BinaryData img) mmap
-        Nothing -> mmap <$ report (BlockNotRendered b)
-    go mmap b@(CodeBlock (_,["json"],kvs) code) =
+        Just mt -> return
+          (M.insert (T.pack mt) (BinaryData img) mmap,
+           meta <> pairsToJSONMeta kvs)
+        Nothing -> (mmap, meta) <$ report (BlockNotRendered b)
+    go (mmap, meta) b@(CodeBlock (_,["json"],_) code) =
       case decode (UTF8.fromStringLazy code) of
-        Just v  -> return $ M.insert "application/json" (JsonData v) mmap
-        Nothing -> mmap <$ report (BlockNotRendered b)
-    go mmap (CodeBlock (_,[],kvs) code) =
-       return $ M.insert "text/plain" (TextualData (T.pack code)) mmap
-    go mmap (RawBlock (Format "text/html") raw) =
-       return $ M.insert "text/html" (TextualData (T.pack raw)) mmap
-    go mmap (RawBlock (Format "text/latex") raw) =
-       return $ M.insert "text/latex" (TextualData (T.pack raw)) mmap
-    go mmap b = mmap <$ report (BlockNotRendered b)
+        Just v  -> return
+                    (M.insert "application/json" (JsonData v) mmap, meta)
+        Nothing -> (mmap, meta) <$ report (BlockNotRendered b)
+    go (mmap, meta) (CodeBlock ("",[],[]) code) =
+       return (M.insert "text/plain" (TextualData (T.pack code)) mmap, meta)
+    go (mmap, meta) (RawBlock (Format "text/html") raw) =
+       return (M.insert "text/html" (TextualData (T.pack raw)) mmap, meta)
+    go (mmap, meta) (RawBlock (Format "text/latex") raw) =
+       return (M.insert "text/latex" (TextualData (T.pack raw)) mmap, meta)
+    go (mmap, meta) b = (mmap, meta) <$ report (BlockNotRendered b)
 
 pairsToJSONMeta :: [(String, String)] -> JSONMeta
 pairsToJSONMeta kvs =
