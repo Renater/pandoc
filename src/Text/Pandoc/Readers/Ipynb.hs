@@ -71,7 +71,10 @@ notebookToPandoc :: (PandocMonad m, FromJSON (Notebook a))
                  => ReaderOptions -> Notebook a -> m Pandoc
 notebookToPandoc opts notebook = do
   let cells = notebookCells notebook
-  let m = jsonMetaToMeta (notebookMetadata notebook)
+  let (fmt,fmtminor) = notebookFormat notebook
+  let m = M.insert "nbformat" (MetaString $ show fmt) $
+          M.insert "nbformat_minor" (MetaString $ show fmtminor) $
+          jsonMetaToMeta (notebookMetadata notebook)
   let lang = case M.lookup "kernelspec" m of
                    Just (MetaMap ks) ->
                       case M.lookup "language" ks of
