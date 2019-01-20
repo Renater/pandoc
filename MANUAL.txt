@@ -731,6 +731,8 @@ General writer options {.options}
     where there are nonsemantic newlines in the source, there
     will be nonsemantic newlines in the output as well).
     Automatic wrapping does not currently work in HTML output.
+    In `ipynb` output, this option affects wrapping of the
+    contents of markdown cells.
 
 `--columns=`*NUMBER*
 
@@ -903,6 +905,7 @@ Options affecting specific writers {.options}
 :   Use ATX-style headers in Markdown output. The default is
     to use setext-style headers for levels 1-2, and then ATX headers.
     (Note: for `gfm` output, ATX headers are always used.)
+    This option also affects markdown cells in `ipynb` output.
 
 `--top-level-division=[default|section|chapter|part]`
 
