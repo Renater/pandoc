@@ -213,9 +213,9 @@ extractData bs = do
         Nothing -> (mmap, meta) <$ report (BlockNotRendered b)
     go (mmap, meta) (CodeBlock ("",[],[]) code) =
        return (M.insert "text/plain" (TextualData (T.pack code)) mmap, meta)
-    go (mmap, meta) (RawBlock (Format "text/html") raw) =
+    go (mmap, meta) (RawBlock (Format "html") raw) =
        return (M.insert "text/html" (TextualData (T.pack raw)) mmap, meta)
-    go (mmap, meta) (RawBlock (Format "text/latex") raw) =
+    go (mmap, meta) (RawBlock (Format "latex") raw) =
        return (M.insert "text/latex" (TextualData (T.pack raw)) mmap, meta)
     go (mmap, meta) b = (mmap, meta) <$ report (BlockNotRendered b)
 
