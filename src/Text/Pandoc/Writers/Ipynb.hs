@@ -39,7 +39,7 @@ module Text.Pandoc.Writers.Ipynb ( writeIpynb )
 where
 import Prelude
 import qualified Data.Map as M
-import Data.List (partition, intersperse)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Text.Pandoc.Options
 import Text.Pandoc.Definition
 import Data.Ipynb as Ipynb
@@ -104,20 +104,19 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
         , cellAttachments = attachments } :) <$> extractCells opts bs
   | "cell" `elem` classes
   , "code" `elem` classes = do
-      let isCode (CodeBlock (_,cl,_) _ ) = "python" `elem` cl
-          isCode _                       = False
-      let (codeBlocks, _outputBlocks) = partition isCode xs
-      let codeContent = mconcat $ intersperse "\n"
-              [t | CodeBlock _ t <- codeBlocks]
+      let (codeContent, rest) =
+            case xs of
+               (CodeBlock _ t : ys) -> (T.pack t, ys)
+               ys                   -> (mempty, ys)
       let meta = pairsToJSONMeta kvs
-      let outputs = mempty -- TODO add this later
+      let outputs = mapMaybe blockToOutput rest
       let exeCount = lookup "execution_count" kvs >>= safeRead
       (Cell{
           cellType = Ipynb.Code {
                 codeExecutionCount = exeCount
               , codeOutputs = outputs
               }
-        , cellSource = Source $ breakLines $ T.pack codeContent
+        , cellSource = Source $ breakLines codeContent
         , cellMetadata = meta
         , cellAttachments = Nothing } :) <$> extractCells opts bs
   | "cell" `elem` classes
@@ -140,7 +139,7 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
             , cellAttachments = Nothing } :) <$> extractCells opts bs
         _ -> extractCells opts bs
 extractCells opts (CodeBlock (_id,classes,kvs) raw : bs)
-  | "python" `elem` classes = do
+  | "code" `elem` classes = do
       let meta = pairsToJSONMeta kvs
       let exeCount = lookup "execution_count" kvs >>= safeRead
       (Cell{
@@ -152,7 +151,7 @@ extractCells opts (CodeBlock (_id,classes,kvs) raw : bs)
         , cellMetadata = meta
         , cellAttachments = Nothing } :) <$> extractCells opts bs
 extractCells opts (b:bs) = do
-      let isCodeOrDiv (CodeBlock (_,cl,_) _) = "python" `elem` cl
+      let isCodeOrDiv (CodeBlock (_,cl,_) _) = "code" `elem` cl
           isCodeOrDiv (Div (_,cl,_) _)       = "cell" `elem` cl
           isCodeOrDiv _                      = False
       let (mds, rest) = break (isCodeOrDiv) bs
@@ -165,6 +164,27 @@ extractCells opts (b:bs) = do
         , cellSource = Source $ breakLines source
         , cellMetadata = mempty
         , cellAttachments = attachments } :) <$> extractCells opts rest
+
+blockToOutput :: Block -> Maybe (Output a)
+blockToOutput (Div (_,["output","stream",sname],_) (CodeBlock _ t:_)) =
+  Just $ Stream{ streamName = T.pack sname
+               , streamText = Source (breakLines $ T.pack t) }
+blockToOutput (Div (_,["output","error"],kvs) (CodeBlock _ t:_)) =
+  Just $ Err{ errName = maybe mempty T.pack (lookup "ename" kvs)
+            , errValue = maybe mempty T.pack (lookup "evalue" kvs)
+            , errTraceback = breakLines $ T.pack t }
+blockToOutput (Div (_,["output","execute_result"],kvs) bs) =
+  Just $ ExecuteResult{ executeCount = fromMaybe 0 $
+                          lookup "execution_count" kvs >>= safeRead
+                      , executeData = extractData bs
+                      , executeMetadata = pairsToJSONMeta kvs }
+blockToOutput (Div (_,["output","display_data"],kvs) bs) =
+  Just $ DisplayData { displayData = extractData bs
+                     , displayMetadata = pairsToJSONMeta kvs }
+blockToOutput _ = Nothing
+
+extractData :: [Block] -> MimeBundle
+extractData bs = undefined
 
 pairsToJSONMeta :: [(String, String)] -> JSONMeta
 pairsToJSONMeta kvs =

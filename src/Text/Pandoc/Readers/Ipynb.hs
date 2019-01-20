@@ -134,9 +134,8 @@ addAttachment (fname, mimeBundle) = do
 outputToBlock :: PandocMonad m => ReaderOptions -> Output a -> m B.Blocks
 outputToBlock _ Stream{ streamName = sName,
                         streamText = Source text } = do
-  return $ B.divWith ("",["output","stream"],[])
-         $ B.codeBlockWith ("",[T.unpack sName],[])
-         $ T.unpack . mconcat $ text
+  return $ B.divWith ("",["output","stream",T.unpack sName],[])
+         $ B.codeBlock $ T.unpack . mconcat $ text
 outputToBlock opts DisplayData{ displayData = data',
                                  displayMetadata = metadata' } =
   B.divWith ("",["output", "display_data"],[]) <$>
@@ -152,8 +151,7 @@ outputToBlock _ Err{ errName = ename,
   return $ B.divWith ("",["output","error"],
                          [("ename",T.unpack ename),
                           ("evalue",T.unpack evalue)])
-         $ B.codeBlockWith ("",["traceback"],[])
-         $ T.unpack . T.unlines $ traceback
+         $ B.codeBlock $ T.unpack . T.unlines $ traceback
 
 -- We want to display the richest output possible given
 -- the output format.
