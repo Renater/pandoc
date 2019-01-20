@@ -77,10 +77,7 @@ pandocToNotebook opts (Pandoc meta blocks) = do
            opts{ writerTemplate = Nothing } (Pandoc nullMeta bs)
   let inlineWriter ils = T.stripEnd <$> writeMarkdown
            opts{ writerTemplate = Nothing } (Pandoc nullMeta [Plain ils])
-  let meta' = case lookupMeta "jupyter" meta of
-                Just (MetaMap m') -> Meta m'
-                _                 -> meta
-  metadata' <- metaToJSON' blockWriter inlineWriter meta'
+  metadata' <- metaToJSON' blockWriter inlineWriter meta
   let metadata = case fromJSON metadata' of
                    Error _ -> mempty -- TODO warning here? shouldn't happen
                    Success x -> x
