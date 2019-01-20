@@ -226,5 +226,7 @@ pairsToJSONMeta kvs =
   M.fromList [(T.pack k, case v of
                            "true"  -> Bool True
                            "false" -> Bool False
-                           _       -> String (T.pack v))
+                           _       -> case safeRead v of
+                                        Just n -> Number n
+                                        _      -> String (T.pack v))
              | (k,v) <- kvs , k /= "execution_count" ]
