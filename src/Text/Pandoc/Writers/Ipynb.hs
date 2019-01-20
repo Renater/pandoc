@@ -116,7 +116,10 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
           cellType = Markdown
         , cellSource = Source $ breakLines source
         , cellMetadata = meta
-        , cellAttachments = Just attachments } :) <$> extractCells opts bs
+        , cellAttachments = if null attachments
+                               then Nothing
+                               else Just attachments } :)
+            <$> extractCells opts bs
   | "cell" `elem` classes
   , "code" `elem` classes = do
       let (codeContent, rest) =
