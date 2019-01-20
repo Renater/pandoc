@@ -36,12 +36,13 @@ module Text.Pandoc.Writers.Ipynb ( writeIpynb )
 where
 import Prelude
 import Control.Monad (foldM)
+import Control.Monad.State
 import qualified Data.Map as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Text.Pandoc.Options
 import Text.Pandoc.Definition
 import Data.Ipynb as Ipynb
-import Text.Pandoc.Walk (query)
+import Text.Pandoc.Walk (walkM)
 import Text.Pandoc.Class
 import Text.Pandoc.Logging
 import Data.Text (Text)
@@ -90,14 +91,15 @@ pandocToNotebook opts (Pandoc meta blocks) = do
      , notebookCells = cells }
 
 addAttachment :: PandocMonad m
-              => M.Map Text MimeBundle
-              -> String
-              -> m (M.Map Text MimeBundle)
-addAttachment mmap src = do
+              => Inline
+              -> StateT (M.Map Text MimeBundle) m Inline
+addAttachment (Image attr lab (src,tit)) = do
   (img, mbmt) <- fetchItem src
   let mt = maybe "application/octet-stream" (T.pack) mbmt
-  return $ M.insert (T.pack src)
-              (MimeBundle (M.insert mt (BinaryData img) mempty)) mmap
+  modify $ M.insert (T.pack src)
+          (MimeBundle (M.insert mt (BinaryData img) mempty))
+  return $ Image attr lab ("attachment:" <> src, tit)
+addAttachment x = return x
 
 extractCells :: PandocMonad m => WriterOptions -> [Block] -> m [Cell a]
 extractCells _ [] = return []
@@ -105,18 +107,14 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
   | "cell" `elem` classes
   , "markdown" `elem` classes = do
       let meta = pairsToJSONMeta kvs
-      source <- writeMarkdown opts{ writerTemplate = Nothing }
-                  (Pandoc nullMeta xs)
-      let (imgSources :: [String]) = query
-             (\il -> case il of
-                       Image _ _ (s,_) -> [s]
-                       _               -> []) xs
-      attachments <- foldM addAttachment mempty imgSources
+      (newdoc, attachments) <-
+        runStateT (walkM addAttachment (Pandoc nullMeta xs)) mempty
+      source <- writeMarkdown opts{ writerTemplate = Nothing } newdoc
       (Cell{
           cellType = Markdown
         , cellSource = Source $ breakLines source
         , cellMetadata = meta
-        , cellAttachments = if null attachments
+        , cellAttachments = if M.null attachments
                                then Nothing
                                else Just attachments } :)
             <$> extractCells opts bs
