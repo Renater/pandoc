@@ -38,15 +38,18 @@ TODO:
 module Text.Pandoc.Writers.Ipynb ( writeIpynb )
 where
 import Prelude
+import Control.Monad (foldM)
 import qualified Data.Map as M
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Text.Pandoc.Options
 import Text.Pandoc.Definition
 import Data.Ipynb as Ipynb
 import Text.Pandoc.Class
+import Text.Pandoc.Logging
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson as Aeson
+import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.Shared (safeRead)
 import Text.Pandoc.Writers.Shared (metaToJSON')
 import Text.Pandoc.Writers.Markdown (writeMarkdown)
@@ -109,7 +112,7 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
                (CodeBlock _ t : ys) -> (T.pack t, ys)
                ys                   -> (mempty, ys)
       let meta = pairsToJSONMeta kvs
-      let outputs = mapMaybe blockToOutput rest
+      outputs <- catMaybes <$> mapM blockToOutput rest
       let exeCount = lookup "execution_count" kvs >>= safeRead
       (Cell{
           cellType = Ipynb.Code {
@@ -165,26 +168,49 @@ extractCells opts (b:bs) = do
         , cellMetadata = mempty
         , cellAttachments = attachments } :) <$> extractCells opts rest
 
-blockToOutput :: Block -> Maybe (Output a)
+blockToOutput :: PandocMonad m => Block -> m (Maybe (Output a))
 blockToOutput (Div (_,["output","stream",sname],_) (CodeBlock _ t:_)) =
-  Just $ Stream{ streamName = T.pack sname
+  return $ Just
+         $ Stream{ streamName = T.pack sname
                , streamText = Source (breakLines $ T.pack t) }
 blockToOutput (Div (_,["output","error"],kvs) (CodeBlock _ t:_)) =
-  Just $ Err{ errName = maybe mempty T.pack (lookup "ename" kvs)
-            , errValue = maybe mempty T.pack (lookup "evalue" kvs)
-            , errTraceback = breakLines $ T.pack t }
-blockToOutput (Div (_,["output","execute_result"],kvs) bs) =
-  Just $ ExecuteResult{ executeCount = fromMaybe 0 $
+  return $ Just
+         $ Err{ errName = maybe mempty T.pack (lookup "ename" kvs)
+              , errValue = maybe mempty T.pack (lookup "evalue" kvs)
+              , errTraceback = breakLines $ T.pack t }
+blockToOutput (Div (_,["output","execute_result"],kvs) bs) = do
+  data' <- extractData bs
+  return $ Just
+         $ ExecuteResult{ executeCount = fromMaybe 0 $
                           lookup "execution_count" kvs >>= safeRead
-                      , executeData = extractData bs
-                      , executeMetadata = pairsToJSONMeta kvs }
-blockToOutput (Div (_,["output","display_data"],kvs) bs) =
-  Just $ DisplayData { displayData = extractData bs
-                     , displayMetadata = pairsToJSONMeta kvs }
-blockToOutput _ = Nothing
+                        , executeData = data'
+                        , executeMetadata = pairsToJSONMeta kvs }
+blockToOutput (Div (_,["output","display_data"],kvs) bs) = do
+  data' <- extractData bs
+  return $ Just
+         $ DisplayData { displayData = data'
+                       , displayMetadata = pairsToJSONMeta kvs }
+blockToOutput _ = return Nothing
 
-extractData :: [Block] -> MimeBundle
-extractData bs = undefined
+extractData :: PandocMonad m => [Block] -> m MimeBundle
+extractData bs = MimeBundle <$> foldM go mempty bs
+  where
+    go mmap b@(Para [Image (_,_,kvs) _ (src,_)]) = do
+      (img, mbmt) <- fetchItem src
+      case mbmt of
+        Just mt -> return $ M.insert (T.pack mt) (BinaryData img) mmap
+        Nothing -> mmap <$ report (BlockNotRendered b)
+    go mmap b@(CodeBlock (_,["json"],kvs) code) =
+      case decode (UTF8.fromStringLazy code) of
+        Just v  -> return $ M.insert "application/json" (JsonData v) mmap
+        Nothing -> mmap <$ report (BlockNotRendered b)
+    go mmap (CodeBlock (_,[],kvs) code) =
+       return $ M.insert "text/plain" (TextualData (T.pack code)) mmap
+    go mmap (RawBlock (Format "text/html") raw) =
+       return $ M.insert "text/html" (TextualData (T.pack raw)) mmap
+    go mmap (RawBlock (Format "text/latex") raw) =
+       return $ M.insert "text/latex" (TextualData (T.pack raw)) mmap
+    go mmap b = mmap <$ report (BlockNotRendered b)
 
 pairsToJSONMeta :: [(String, String)] -> JSONMeta
 pairsToJSONMeta kvs =
