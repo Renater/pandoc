@@ -31,9 +31,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 Ipynb (Jupyter notebook JSON format) writer for pandoc.
 
-TODO:
-[ ] Attachments (from mediabag)
-[ ] Code cells (output)
 -}
 module Text.Pandoc.Writers.Ipynb ( writeIpynb )
 where
@@ -44,6 +41,7 @@ import Data.Maybe (catMaybes, fromMaybe)
 import Text.Pandoc.Options
 import Text.Pandoc.Definition
 import Data.Ipynb as Ipynb
+import Text.Pandoc.Walk (query)
 import Text.Pandoc.Class
 import Text.Pandoc.Logging
 import Data.Text (Text)
@@ -91,6 +89,16 @@ pandocToNotebook opts (Pandoc meta blocks) = do
      , notebookFormat = (4, 5)
      , notebookCells = cells }
 
+addAttachment :: PandocMonad m
+              => M.Map Text MimeBundle
+              -> String
+              -> m (M.Map Text MimeBundle)
+addAttachment mmap src = do
+  (img, mbmt) <- fetchItem src
+  let mt = maybe "application/octet-stream" (T.pack) mbmt
+  return $ M.insert (T.pack src)
+              (MimeBundle (M.insert mt (BinaryData img) mempty)) mmap
+
 extractCells :: PandocMonad m => WriterOptions -> [Block] -> m [Cell a]
 extractCells _ [] = return []
 extractCells opts (Div (_id,classes,kvs) xs : bs)
@@ -99,12 +107,16 @@ extractCells opts (Div (_id,classes,kvs) xs : bs)
       let meta = pairsToJSONMeta kvs
       source <- writeMarkdown opts{ writerTemplate = Nothing }
                   (Pandoc nullMeta xs)
-      let attachments = Nothing -- TODO add this later
+      let (imgSources :: [String]) = query
+             (\il -> case il of
+                       Image _ _ (s,_) -> [s]
+                       _               -> []) xs
+      attachments <- foldM addAttachment mempty imgSources
       (Cell{
           cellType = Markdown
         , cellSource = Source $ breakLines source
         , cellMetadata = meta
-        , cellAttachments = attachments } :) <$> extractCells opts bs
+        , cellAttachments = Just attachments } :) <$> extractCells opts bs
   | "cell" `elem` classes
   , "code" `elem` classes = do
       let (codeContent, rest) =
@@ -158,15 +170,7 @@ extractCells opts (b:bs) = do
           isCodeOrDiv (Div (_,cl,_) _)       = "cell" `elem` cl
           isCodeOrDiv _                      = False
       let (mds, rest) = break (isCodeOrDiv) bs
-      let mdBlocks = b:mds
-      source <- writeMarkdown opts{ writerTemplate = Nothing }
-                  (Pandoc nullMeta mdBlocks)
-      let attachments = Nothing -- TODO add this later
-      (Cell{
-          cellType = Markdown
-        , cellSource = Source $ breakLines source
-        , cellMetadata = mempty
-        , cellAttachments = attachments } :) <$> extractCells opts rest
+      extractCells opts (Div ("",["cell","markdown"],[]) (b:mds) : rest)
 
 blockToOutput :: PandocMonad m => Block -> m (Maybe (Output a))
 blockToOutput (Div (_,["output","stream",sname],_) (CodeBlock _ t:_)) =
