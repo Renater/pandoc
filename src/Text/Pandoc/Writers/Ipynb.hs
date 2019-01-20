@@ -43,6 +43,7 @@ import Text.Pandoc.Options
 import Text.Pandoc.Definition
 import Data.Ipynb as Ipynb
 import Text.Pandoc.Walk (walkM)
+import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Class
 import Text.Pandoc.Logging
 import Data.Text (Text)
@@ -77,7 +78,9 @@ pandocToNotebook opts (Pandoc meta blocks) = do
            opts{ writerTemplate = Nothing } (Pandoc nullMeta bs)
   let inlineWriter ils = T.stripEnd <$> writeMarkdown
            opts{ writerTemplate = Nothing } (Pandoc nullMeta [Plain ils])
-  metadata' <- metaToJSON' blockWriter inlineWriter meta
+  metadata' <- metaToJSON' blockWriter inlineWriter $
+                 B.deleteMeta "nbformat" $
+                 B.deleteMeta "nbformat_minor" $ meta
   let metadata = case fromJSON metadata' of
                    Error _ -> mempty -- TODO warning here? shouldn't happen
                    Success x -> x
